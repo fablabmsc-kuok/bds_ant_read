@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "WebFetch(*)",
+      "WebFetch(*)",
+      "Bash(node -e \"\nconst fs = require\\('fs'\\);\nconst html = fs.readFileSync\\('bds_map.html', 'utf8'\\);\nconst m = html.match\\(/<script>\\\\s*\\([\\\\s\\\\S]*?\\)<\\\\/script>/\\);\nif \\(!m\\) { console.error\\('no inline script'\\); process.exit\\(1\\); }\nfs.writeFileSync\\(require\\('os'\\).tmpdir\\(\\) + '/bds_map_check.js', m[1]\\);\n\" && node --check \"$\\(node -p \"require\\('os'\\).tmpdir\\(\\)\"\\)/bds_map_check.js\" && echo \"JS syntax OK\")",
+      "Bash(node -e \"try{require.resolve\\('playwright'\\);console.log\\('playwright yes'\\)}catch\\(e\\){console.log\\('playwright no'\\)} try{require.resolve\\('puppeteer'\\);console.log\\('puppeteer yes'\\)}catch\\(e\\){console.log\\('puppeteer no'\\)}\" 2>/dev/null; ls \"/c/Program Files/Google/Chrome/Application/chrome.exe\" 2>/dev/null || echo \"chrome not found at default path\")",
+      "Bash(node:*)",
+      "Bash(cd \"D:\\\\Google Drive\\\\MsC works\\\\Made\\\\AI gen code\\\\qoder-cli\\\\real_BDS_pos\\\\bds_ant_read\" && node _make_icons.js && rm _make_icons.js && ls -la icon-192.png icon-512.png)",
+      "Bash(cd \"D:\\\\Google Drive\\\\MsC works\\\\Made\\\\AI gen code\\\\qoder-cli\\\\real_BDS_pos\\\\bds_ant_read\" && node _html_check.js; echo \"--- sky test ---\"; node _sky_test.js)",
+      "Bash(cd \"D:\\\\Google Drive\\\\MsC works\\\\Made\\\\AI gen code\\\\qoder-cli\\\\real_BDS_pos\\\\bds_ant_read\" && node --check sw.js && node -e \"JSON.parse\\(require\\('fs'\\).readFileSync\\('manifest.webmanifest','utf8'\\)\\); console.log\\('PASS manifest JSON'\\)\" && ls \"/c/Program Files/Google/Chrome/Application/chrome.exe\" 2>/dev/null || echo \"chrome not at default path\")",
+      "Bash(ls \"/c/Program Files \\(x86\\)/Google/Chrome/Application/chrome.exe\" \"/c/Program Files/Microsoft/Edge/Application/msedge.exe\" \"/c/Program Files \\(x86\\)/Microsoft/Edge/Application/msedge.exe\" 2>/dev/null; which chrome msedge 2>/dev/null; echo done)",
+      "Read(//c/Program Files \\(x86\\)/Google/Chrome/Application/**)",
+      "Bash(cd \"D:\\\\Google Drive\\\\MsC works\\\\Made\\\\AI gen code\\\\qoder-cli\\\\real_BDS_pos\\\\bds_ant_read\" && node _browser_test.js)",
+      "Bash"
+    ]
+  }
+}

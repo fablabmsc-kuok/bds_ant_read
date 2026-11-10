@@ -1,0 +1,2837 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>北斗 NMEA 即時定位 | BDS Antenna Reader</title>
+<link rel="manifest" href="./manifest.webmanifest">
+<meta name="theme-color" content="#0b1220">
+<link rel="stylesheet" href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css"
+      integrity="sha384-MinO0mNliZ3vwppuPOUnGa+iq619pfMhLVUXfC4LHwSCvF9H+6P/KO4Q7qBOYV5V"
+      crossorigin="anonymous">
+<style>
+  :root {
+    --panel-bg: rgba(15, 23, 42, .94);
+    --field-bg: #111c31;
+    --line: #24324a;
+    --line-strong: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --dim: #64748b;
+    --accent: #0284c7;
+    --ok: #4ade80;
+    --warn: #fcd34d;
+    --err: #fca5a5;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    height: 100%;
+    font-family: "Segoe UI", "Microsoft JhengHei", "Noto Sans TC", system-ui, sans-serif;
+    background: #0b1220;
+  }
+
+  #map {
+    position: absolute;
+    inset: 0;
+    background: #0b1220;
+    z-index: 0;
+  }
+
+  #panel {
+    position: absolute;
+    top: 12px;
+    left: 12px;
+    z-index: 1000;
+    width: 344px;
+    max-width: calc(100vw - 24px);
+    max-height: calc(100vh - 24px);
+    overflow: auto;
+    padding: 14px 14px 12px;
+    color: var(--text);
+    background: var(--panel-bg);
+    border: 1px solid rgba(148, 163, 184, .25);
+    border-radius: 14px;
+    box-shadow: 0 12px 40px rgba(0, 0, 0, .45);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  #panel h1 {
+    margin: 0 0 2px;
+    font-size: 16px;
+    font-weight: 600;
+    letter-spacing: .02em;
+  }
+
+  .sub {
+    margin: 0 0 12px;
+    font-size: 11.5px;
+    color: var(--dim);
+  }
+
+  .label {
+    display: block;
+    margin: 0 0 5px;
+    font-size: 11px;
+    letter-spacing: .05em;
+    color: var(--muted);
+  }
+
+  .row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+  }
+
+  #panel select {
+    flex: 1;
+    min-width: 0;
+    padding: 7px 8px;
+    font-size: 12.5px;
+    color: var(--text);
+    background: var(--field-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    outline: none;
+  }
+
+  #panel select:focus-visible,
+  #panel button:focus-visible {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(2, 132, 199, .35);
+  }
+
+  #panel button {
+    padding: 7px 11px;
+    font-size: 12.5px;
+    color: var(--text);
+    background: #1e293b;
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  #panel button:hover:not(:disabled) { background: #273449; }
+
+  #panel button.primary {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: #fff;
+  }
+
+  #panel button.primary:hover:not(:disabled) { background: #0369a1; }
+
+  #panel button.danger {
+    background: #7f1d1d;
+    border-color: #991b1b;
+    color: #fecaca;
+  }
+
+  #panel button.danger:hover:not(:disabled) { background: #991b1b; }
+
+  #panel button:disabled {
+    opacity: .45;
+    cursor: default;
+  }
+
+  .status {
+    margin: 10px 0 4px;
+    padding: 7px 10px;
+    font-size: 12.5px;
+    font-weight: 600;
+    color: #cbd5e1;
+    background: var(--field-bg);
+    border: 1px solid var(--line-strong);
+    border-radius: 8px;
+  }
+
+  .status.ok {
+    color: var(--ok);
+    background: #052e16;
+    border-color: #15803d;
+  }
+
+  .status.warn {
+    color: var(--warn);
+    background: #331a05;
+    border-color: #b45309;
+  }
+
+  .status.err {
+    color: var(--err);
+    background: #3f0d0d;
+    border-color: #b91c1c;
+  }
+
+  .gps-marker {
+    width: 18px;
+    height: 18px;
+    border-radius: 50%;
+    background: #0ea5e9;
+    border: 3px solid #ffffff;
+    box-shadow: 0 0 0 5px rgba(14, 165, 233, .25), 0 2px 10px rgba(0, 0, 0, .45);
+  }
+
+  .gps-marker.stale {
+    background: #9ca3af;
+    box-shadow: 0 0 0 5px rgba(156, 163, 175, .2), 0 2px 10px rgba(0, 0, 0, .45);
+  }
+
+  .gps-heading {
+    position: absolute;
+    inset: 0;
+    transform-origin: 50% 50%;
+    transition: transform .25s linear;
+    pointer-events: none;
+  }
+
+  .gps-marker:not(.moving) .gps-heading { display: none; }
+
+  .gps-heading::before {
+    content: "";
+    position: absolute;
+    left: 50%;
+    top: -16px;
+    margin-left: -7px;
+    border-left: 7px solid transparent;
+    border-right: 7px solid transparent;
+    border-bottom: 16px solid rgba(14, 165, 233, .95);
+    filter: drop-shadow(0 1px 2px rgba(0, 0, 0, .35));
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 8px;
+    margin: 10px 0 6px;
+  }
+
+  .field {
+    padding: 6px 9px;
+    background: var(--field-bg);
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    min-height: 46px;
+  }
+
+  .field.wide { grid-column: 1 / -1; }
+
+  .field span {
+    display: block;
+    margin-bottom: 2px;
+    font-size: 10.5px;
+    letter-spacing: .05em;
+    color: var(--muted);
+  }
+
+  .field b {
+    display: block;
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    overflow-wrap: anywhere;
+  }
+
+  .follow {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    font-size: 12.5px;
+    color: #cbd5e1;
+    cursor: pointer;
+    user-select: none;
+  }
+
+  .follow input { accent-color: var(--accent); }
+
+  .raw {
+    margin-top: 10px;
+    padding-top: 8px;
+    font-size: 12px;
+    color: var(--muted);
+    border-top: 1px dashed var(--line-strong);
+  }
+
+  .raw summary {
+    cursor: pointer;
+    user-select: none;
+  }
+
+  #rawLog {
+    max-height: 150px;
+    margin: 8px 0 0;
+    padding: 8px;
+    overflow: auto;
+    font: 11px/1.45 ui-monospace, Consolas, "Courier New", monospace;
+    color: #a7f3d0;
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: #0b1220;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+  }
+
+  .hint {
+    margin: 6px 0 0;
+    font-size: 11px;
+    line-height: 1.55;
+    color: var(--dim);
+  }
+
+  #skyplot {
+    position: absolute;
+    right: 12px;
+    bottom: 118px;
+    z-index: 1000;
+    width: 240px;
+    padding: 8px 10px 9px;
+    color: var(--text);
+    background: var(--panel-bg);
+    border: 1px solid rgba(148, 163, 184, .25);
+    border-radius: 12px;
+    box-shadow: 0 8px 28px rgba(0, 0, 0, .4);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+  }
+
+  .sky-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: baseline;
+    margin-bottom: 4px;
+    font-size: 11px;
+    letter-spacing: .05em;
+    color: var(--muted);
+  }
+
+  .sky-head b {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sky-stats {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    margin-bottom: 4px;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .sky-stats b {
+    font-weight: 600;
+    color: var(--text);
+    font-variant-numeric: tabular-nums;
+  }
+
+  .sky-note {
+    margin-top: 3px;
+    font-size: 9.5px;
+    color: var(--dim);
+  }
+
+  #skyCanvas {
+    display: block;
+    width: 100%;
+    height: auto;
+  }
+
+  .sky-legend {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 2px 8px;
+    margin-top: 4px;
+    font-size: 10px;
+    color: var(--muted);
+  }
+
+  .sky-legend span {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+  }
+
+  .sky-legend img {
+    width: 15px;
+    height: 15px;
+    border-radius: 50%;
+  }
+
+  .map-error {
+    position: absolute;
+    inset: 0;
+    z-index: 10;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    font-size: 14px;
+    line-height: 1.6;
+    text-align: center;
+    color: #fca5a5;
+    background: #0b1220;
+  }
+
+  .panel-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 8px;
+  }
+
+  #btnCollapse {
+    flex: 0 0 auto;
+    width: 26px;
+    height: 26px;
+    padding: 0;
+    font-size: 15px;
+    line-height: 1;
+    color: var(--muted);
+  }
+
+  #panel.collapsed { width: 218px; }
+  #panel.collapsed .panel-body { display: none; }
+
+  .sect {
+    margin-top: 10px;
+    padding-top: 9px;
+    border-top: 1px dashed var(--line-strong);
+  }
+
+  .sect > summary {
+    cursor: pointer;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: .04em;
+    color: var(--muted);
+    user-select: none;
+  }
+
+  .sect[open] > summary { margin-bottom: 7px; }
+
+  .grid.mini .field {
+    min-height: 40px;
+    padding: 4px 8px;
+  }
+
+  .grid.mini .field b { font-size: 12.5px; }
+
+  .field.rtk b { color: var(--ok); }
+  .field.float b { color: var(--warn); }
+  .field.bad b { color: var(--err); }
+
+  .row.compact { margin-bottom: 6px; }
+
+  #replaySeek {
+    width: 100%;
+    margin: 6px 0 2px;
+    accent-color: var(--accent);
+  }
+
+  .replay-meta {
+    display: flex;
+    justify-content: space-between;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--muted);
+    font-variant-numeric: tabular-nums;
+  }
+
+  #btnInstall { width: 100%; margin-top: 6px; }
+
+  @media (max-width: 560px) {
+    #panel {
+      top: 8px;
+      left: 8px;
+      right: 8px;
+      width: auto;
+      max-height: 56vh;
+    }
+
+    #skyplot {
+      right: 8px;
+      bottom: 102px;
+      width: 176px;
+      padding: 6px 8px 7px;
+    }
+  }
+</style>
+</head>
+<body>
+<div id="map"></div>
+
+<div id="panel">
+  <div class="panel-head">
+    <div>
+      <h1>北斗 NMEA 即時定位</h1>
+      <p class="sub">ESP32 → Web Serial → 即時地圖</p>
+    </div>
+    <button id="btnCollapse" type="button" title="收合面板" aria-label="收合面板" aria-expanded="true">−</button>
+  </div>
+  <div class="panel-body">
+  <label class="label" for="portSelect">讀取連接埠（COM）</label>
+  <div class="row">
+    <select id="portSelect">
+      <option value="">尚未選擇</option>
+    </select>
+    <button id="btnPick" type="button">選擇…</button>
+  </div>
+
+  <div class="row">
+    <select id="baudSelect" aria-label="鮑率">
+      <option value="9600">9600 bps</option>
+      <option value="19200">19200 bps</option>
+      <option value="38400">38400 bps</option>
+      <option value="57600">57600 bps</option>
+      <option value="115200" selected>115200 bps</option>
+      <option value="230400">230400 bps</option>
+      <option value="460800">460800 bps</option>
+      <option value="921600">921600 bps</option>
+    </select>
+    <button id="btnConnect" class="primary" type="button">連線</button>
+  </div>
+
+  <div id="status" class="status">未連線</div>
+
+  <div class="grid">
+    <div class="field wide"><span>目前座標</span><b id="vCoord">—</b></div>
+    <div class="field wide"><span>所在道路</span><b id="vStreet">—</b></div>
+    <div class="field"><span>定位狀態</span><b id="vFix">—</b></div>
+    <div class="field"><span>星系</span><b id="vTalker">—</b></div>
+    <div class="field"><span>衛星（使用 / 可見）</span><b id="vSats">—</b></div>
+    <div class="field"><span>HDOP</span><b id="vHdop">—</b></div>
+    <div class="field"><span>海拔</span><b id="vAlt">—</b></div>
+    <div class="field"><span>地面速度</span><b id="vSpeed">—</b></div>
+    <div class="field"><span>航向</span><b id="vCourse">—</b></div>
+    <div class="field wide"><span>日期（UTC）</span><b id="vDate">—</b></div>
+    <div class="field"><span>時間（UTC）</span><b id="vUtc">—</b></div>
+    <div class="field"><span>時間（UTC+8）</span><b id="vUtc8">—</b></div>
+  </div>
+
+  <div class="row compact">
+    <select id="coordFormat" aria-label="座標格式">
+      <option value="dd">十進位（DD）</option>
+      <option value="dms">度分秒（DMS）</option>
+      <option value="twd97">TWD97 TM2</option>
+      <option value="utm">UTM 51N</option>
+    </select>
+    <button id="btnCopy" type="button">複製</button>
+  </div>
+  <div class="row compact">
+    <button id="btnGmaps" type="button">Google Maps</button>
+    <button id="btnOsm" type="button">OpenStreetMap</button>
+  </div>
+
+  <div class="row" style="margin-top: 8px;">
+    <button id="btnCenter" type="button">置中</button>
+    <button id="btnFit" type="button">全覽軌跡</button>
+    <button id="btnClear" type="button">清除軌跡</button>
+  </div>
+
+  <label class="label" for="baseSelect">底圖樣式</label>
+  <div class="row">
+    <select id="baseSelect" title="切換 OpenFreeMap 底圖樣式"></select>
+  </div>
+
+  <label class="follow"><input type="checkbox" id="chkFollow" checked> 地圖跟隨移動</label>
+
+  <details class="sect" open>
+    <summary>行程統計</summary>
+    <div class="grid mini">
+      <div class="field"><span>總距離</span><b id="vDist">—</b></div>
+      <div class="field"><span>移動時間</span><b id="vMove">—</b></div>
+      <div class="field"><span>平均速度</span><b id="vAvg">—</b></div>
+      <div class="field"><span>最高速度</span><b id="vMaxSpeed">—</b></div>
+      <div class="field"><span>累計爬升</span><b id="vAscent">—</b></div>
+      <div class="field"><span>累計下降</span><b id="vDescent">—</b></div>
+      <div class="field wide"><span>精度評級</span><b id="vQuality">—</b></div>
+    </div>
+  </details>
+
+  <details class="sect">
+    <summary>訊號品質</summary>
+    <div class="grid mini">
+      <div class="field"><span>PDOP</span><b id="vPdop">—</b></div>
+      <div class="field"><span>VDOP</span><b id="vVdop">—</b></div>
+      <div class="field"><span>資料率</span><b id="vRate">—</b></div>
+      <div class="field"><span>校驗錯誤</span><b id="vErrCount">—</b></div>
+    </div>
+  </details>
+
+  <details class="sect">
+    <summary>軌跡匯出／匯入</summary>
+    <div class="row compact">
+      <select id="exportFormat" aria-label="匯出格式">
+        <option value="gpx">GPX</option>
+        <option value="geojson">GeoJSON</option>
+        <option value="kml">KML</option>
+        <option value="csv">CSV</option>
+      </select>
+      <button id="btnExport" type="button">匯出</button>
+      <button id="btnImport" type="button">匯入</button>
+    </div>
+    <input id="fileImport" type="file" accept=".gpx,.geojson,.json,.kml" hidden>
+    <p class="hint">匯入 GPX / GeoJSON / KML 會取代目前軌跡；匯出檔含時間與高度。</p>
+  </details>
+
+  <details class="sect">
+    <summary>NMEA 錄製／回放</summary>
+    <div class="row compact">
+      <button id="btnRecord" type="button">開始錄製</button>
+      <button id="btnSaveRec" type="button" disabled>儲存</button>
+      <button id="btnLoadReplay" type="button">載入回放</button>
+    </div>
+    <input id="fileReplay" type="file" accept=".nmea,.txt,.jsonl,.json,.log" hidden>
+    <div class="row compact">
+      <button id="btnReplay" type="button" disabled>播放</button>
+      <select id="replaySpeed" aria-label="回放速度" disabled>
+        <option value="0.5">0.5×</option>
+        <option value="1" selected>1×</option>
+        <option value="2">2×</option>
+        <option value="4">4×</option>
+        <option value="0">最快</option>
+      </select>
+      <button id="btnReplayStop" type="button" disabled>停止</button>
+    </div>
+    <input id="replaySeek" type="range" min="0" max="1000" value="0" step="1" disabled aria-label="回放進度">
+    <div class="replay-meta"><span id="replayTime">—</span><span id="recCount">未錄製</span></div>
+  </details>
+
+  <details class="sect">
+    <summary>設定</summary>
+    <label class="follow"><input type="checkbox" id="chkAutoReconnect"> 斷線後自動重連</label>
+    <label class="follow"><input type="checkbox" id="chkWakeLock"> 連線時保持螢幕常亮</label>
+    <label class="follow"><input type="checkbox" id="chkBeep" checked> 定位中斷提示音</label>
+    <button id="btnInstall" type="button" hidden>安裝為 App</button>
+    <p class="hint">設定會保存在此瀏覽器。</p>
+  </details>
+
+  <details class="raw" id="rawDetails">
+    <summary>原始 NMEA 資料</summary>
+    <pre id="rawLog"></pre>
+  </details>
+
+  <p class="hint" id="browserHint">
+    需桌面版 Chrome / Edge，並以 http://localhost 或 https:// 開啟（Web Serial 安全限制）。
+    地圖底圖使用 OpenFreeMap 向量圖磚（免 API 金鑰）。
+    ESP32 範例以 115200 bps 輸出 NMEA，請將鮑率設為一致。
+  </p>
+  </div>
+</div>
+
+<div id="skyplot" aria-label="衛星天頂圖">
+  <div class="sky-head"><span>衛星天頂圖</span><b id="skyCount">0 顆</b></div>
+  <div class="sky-stats">
+    <span>平均 C/N0 <b id="skyAvg">—</b></span>
+    <span>最佳 <b id="skyBest">—</b></span>
+  </div>
+  <canvas id="skyCanvas" width="400" height="400"></canvas>
+  <div id="skyLegend" class="sky-legend"></div>
+  <div class="sky-note">使用／可見 · 平均 C/N0（dB-Hz）；衛星標籤下方為 C/N0</div>
+</div>
+
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"
+        integrity="sha384-SYKAG6cglRMN0RVvhNeBY0r3FYKNOJtznwA0v7B5Vp9tr31xAHsZC0DqkQ/pZDmj"
+        crossorigin="anonymous"></script>
+<script>
+(function () {
+  'use strict';
+
+  const $ = (id) => document.getElementById(id);
+  const els = {
+    port: $('portSelect'),
+    baud: $('baudSelect'),
+    pick: $('btnPick'),
+    connect: $('btnConnect'),
+    status: $('status'),
+    coord: $('vCoord'),
+    street: $('vStreet'),
+    fix: $('vFix'),
+    talker: $('vTalker'),
+    sats: $('vSats'),
+    hdop: $('vHdop'),
+    alt: $('vAlt'),
+    speed: $('vSpeed'),
+    course: $('vCourse'),
+    date: $('vDate'),
+    utc: $('vUtc'),
+    utc8: $('vUtc8'),
+    sky: $('skyCanvas'),
+    skyCount: $('skyCount'),
+    skyAvg: $('skyAvg'),
+    skyBest: $('skyBest'),
+    skyLegend: $('skyLegend'),
+    base: $('baseSelect'),
+    center: $('btnCenter'),
+    clear: $('btnClear'),
+    follow: $('chkFollow'),
+    rawDetails: $('rawDetails'),
+    rawLog: $('rawLog'),
+    hint: $('browserHint'),
+    collapse: $('btnCollapse'),
+    fit: $('btnFit'),
+    coordFormat: $('coordFormat'),
+    copy: $('btnCopy'),
+    gmaps: $('btnGmaps'),
+    osm: $('btnOsm'),
+    dist: $('vDist'),
+    move: $('vMove'),
+    avg: $('vAvg'),
+    maxSpeed: $('vMaxSpeed'),
+    ascent: $('vAscent'),
+    descent: $('vDescent'),
+    quality: $('vQuality'),
+    pdop: $('vPdop'),
+    vdop: $('vVdop'),
+    rate: $('vRate'),
+    errCount: $('vErrCount'),
+    exportFormat: $('exportFormat'),
+    exportBtn: $('btnExport'),
+    importBtn: $('btnImport'),
+    importFile: $('fileImport'),
+    record: $('btnRecord'),
+    saveRec: $('btnSaveRec'),
+    loadReplay: $('btnLoadReplay'),
+    replayFile: $('fileReplay'),
+    replayBtn: $('btnReplay'),
+    replaySpeed: $('replaySpeed'),
+    replayStop: $('btnReplayStop'),
+    replaySeek: $('replaySeek'),
+    replayTime: $('replayTime'),
+    recCount: $('recCount'),
+    autoReconnect: $('chkAutoReconnect'),
+    wakeLock: $('chkWakeLock'),
+    beep: $('chkBeep'),
+    install: $('btnInstall')
+  };
+
+  const supported = 'serial' in navigator;
+  let grantedPorts = [];
+  let selectedPort = null;
+  let port = null;
+  let reader = null;
+  let pipePromise = null;
+  let closing = false;
+  let connected = false;
+
+  const state = {
+    lat: null,
+    lon: null,
+    street: '',
+    hasFix: false,
+    fixQuality: 0,
+    fixType: 0,
+    satsUsed: null,
+    satsView: null,
+    hdop: null,
+    alt: null,
+    speedKmh: null,
+    course: null,
+    date: '',
+    utcTime: '',
+    utc8Time: '',
+    talker: '',
+    pdop: null,
+    vdop: null,
+    fixTime: null,
+    dayStart: null,
+    checksumErrors: 0,
+    rate: 0,
+    lastSentenceAt: 0,
+    lastPosAt: 0
+  };
+
+  let map = null;
+  let marker = null;
+  let markerEl = null;
+  let headingEl = null;
+  let headingDeg = 0;
+  let track = [];
+  let lastAccuracy = null;
+  let trip = { dist: 0, movingMs: 0, maxSpeed: 0, ascent: 0, descent: 0 };
+  let sentenceCount = 0;
+
+  const SETTINGS_KEY = 'bds_map_settings_v1';
+  let lastPortInfo = null;
+  let wakeLock = null;
+  let reconnectAttempts = 0;
+  let autoConnectTried = false;
+
+  const MAP_STYLES = [
+    { name: 'OpenFreeMap Liberty（預設）', url: 'https://tiles.openfreemap.org/styles/liberty' },
+    { name: 'OpenFreeMap Bright', url: 'https://tiles.openfreemap.org/styles/bright' },
+    { name: 'OpenFreeMap Positron', url: 'https://tiles.openfreemap.org/styles/positron' }
+  ];
+
+  const ATTRIBUTION = '<a href="https://openfreemap.org/" target="_blank" rel="noopener">OpenFreeMap</a> · ' +
+    '&copy; <a href="https://openmaptiles.org/" target="_blank" rel="noopener">OpenMapTiles</a> · ' +
+    'Data &copy; <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap</a>';
+
+  const EMPTY_FC = { type: 'FeatureCollection', features: [] };
+
+  function circlePolygon(lat, lon, radius, steps) {
+    const count = steps || 64;
+    const R = 6378137;
+    const dLat = (radius / R) * (180 / Math.PI);
+    const dLon = (radius / (R * Math.cos(lat * Math.PI / 180))) * (180 / Math.PI);
+    const ring = [];
+    for (let i = 0; i <= count; i++) {
+      const angle = (i / count) * Math.PI * 2;
+      ring.push([lon + dLon * Math.sin(angle), lat + dLat * Math.cos(angle)]);
+    }
+    return ring;
+  }
+
+  const ROAD_CLASSES = new Set(['motorway', 'trunk', 'primary', 'secondary', 'tertiary', 'minor', 'service']);
+  let streetLookupAt = 0;
+  let streetRetry = 0;
+
+  function segmentDistanceM(lat, lon, a, b, mPerLat, mPerLon) {
+    const ax = (a[0] - lon) * mPerLon;
+    const ay = (a[1] - lat) * mPerLat;
+    const bx = (b[0] - lon) * mPerLon;
+    const by = (b[1] - lat) * mPerLat;
+    const dx = bx - ax;
+    const dy = by - ay;
+    const len2 = dx * dx + dy * dy;
+    let t = len2 > 0 ? -(ax * dx + ay * dy) / len2 : 0;
+    t = Math.max(0, Math.min(1, t));
+    return Math.hypot(ax + t * dx, ay + t * dy);
+  }
+
+  function nearestRoadName(features, lat, lon) {
+    const mPerLat = 110540;
+    const mPerLon = 111320 * Math.cos(lat * Math.PI / 180);
+    let best = '';
+    let bestDist = 250;
+    for (const feature of features) {
+      const props = feature.properties || {};
+      if (!ROAD_CLASSES.has(props.class)) continue;
+      const name = props.name || props.name_en || props.ref;
+      const geom = feature.geometry;
+      if (!name || !geom) continue;
+      const lines = geom.type === 'LineString' ? [geom.coordinates]
+        : geom.type === 'MultiLineString' ? geom.coordinates : null;
+      if (!lines) continue;
+      for (const line of lines) {
+        for (let i = 1; i < line.length; i++) {
+          const d = segmentDistanceM(lat, lon, line[i - 1], line[i], mPerLat, mPerLon);
+          if (d < bestDist) {
+            bestDist = d;
+            best = name;
+          }
+        }
+      }
+    }
+    return best;
+  }
+
+  function updateStreet() {
+    if (!map || state.lat == null || state.lon == null || !map.getSource('openmaptiles')) return;
+    const now = Date.now();
+    if (now - streetLookupAt < 600) {
+      if (!streetRetry) {
+        streetRetry = setTimeout(() => {
+          streetRetry = 0;
+          updateStreet();
+        }, 700);
+      }
+      return;
+    }
+    streetLookupAt = now;
+    let features;
+    try {
+      features = map.querySourceFeatures('openmaptiles', { sourceLayer: 'transportation_name' });
+    } catch (err) {
+      return;
+    }
+    const found = nearestRoadName(features, state.lat, state.lon);
+    if (found && found !== state.street) {
+      state.street = found;
+      scheduleRender();
+    }
+  }
+
+  function updateTrackSource() {
+    const src = map && map.getSource('track');
+    if (!src) return;
+    const coords = track.map((p) => [p.lon, p.lat]);
+    src.setData(coords.length >= 2
+      ? { type: 'Feature', properties: {}, geometry: { type: 'LineString', coordinates: coords } }
+      : EMPTY_FC);
+  }
+
+  function updateAccuracySource() {
+    const src = map && map.getSource('accuracy');
+    if (!src) return;
+    src.setData(lastAccuracy
+      ? { type: 'Feature', properties: {}, geometry: { type: 'Polygon', coordinates: [lastAccuracy] } }
+      : EMPTY_FC);
+  }
+
+  function addGeoLayers() {
+    if (!map) return;
+    if (!map.getSource('accuracy')) {
+      map.addSource('accuracy', { type: 'geojson', data: EMPTY_FC });
+      map.addLayer({
+        id: 'accuracy-fill',
+        type: 'fill',
+        source: 'accuracy',
+        paint: { 'fill-color': '#0ea5e9', 'fill-opacity': 0.12 }
+      });
+      map.addLayer({
+        id: 'accuracy-line',
+        type: 'line',
+        source: 'accuracy',
+        paint: { 'line-color': '#0ea5e9', 'line-width': 1, 'line-opacity': 0.6 }
+      });
+    }
+    if (!map.getSource('track')) {
+      map.addSource('track', { type: 'geojson', data: EMPTY_FC });
+      map.addLayer({
+        id: 'track-line',
+        type: 'line',
+        source: 'track',
+        layout: { 'line-cap': 'round', 'line-join': 'round' },
+        paint: { 'line-color': '#f97316', 'line-width': 4, 'line-opacity': 0.85 }
+      });
+    }
+    updateAccuracySource();
+    updateTrackSource();
+  }
+
+  if (typeof maplibregl !== 'undefined') {
+    map = new maplibregl.Map({
+      container: 'map',
+      style: MAP_STYLES[0].url,
+      center: [120.97, 23.9],
+      zoom: 8,
+      attributionControl: false,
+      dragRotate: false,
+      pitchWithRotate: false,
+      touchPitch: false
+    });
+    MAP_STYLES.forEach((style, index) => {
+      const opt = document.createElement('option');
+      opt.value = String(index);
+      opt.textContent = style.name;
+      els.base.appendChild(opt);
+    });
+    map.addControl(new maplibregl.NavigationControl({ showCompass: false }), 'bottom-right');
+    map.addControl(new maplibregl.ScaleControl({ maxWidth: 110, unit: 'metric' }), 'bottom-left');
+    map.addControl(new maplibregl.AttributionControl({
+      compact: true,
+      customAttribution: ATTRIBUTION
+    }), 'bottom-right');
+    const ensureGeoLayers = () => {
+      if (map.isStyleLoaded()) addGeoLayers();
+    };
+    map.on('styledata', ensureGeoLayers);
+    map.on('idle', () => {
+      ensureGeoLayers();
+      if (state.hasFix) updateStreet();
+    });
+    map.on('dragstart', () => { els.follow.checked = false; });
+    map.on('error', (event) => {
+      console.warn('map:', event && event.error ? event.error.message : event);
+    });
+  } else {
+    const err = document.createElement('div');
+    err.className = 'map-error';
+    err.textContent = '無法載入地圖（MapLibre CDN 未載入），NMEA 定位資料仍會顯示在左側面板。';
+    $('map').appendChild(err);
+    els.base.disabled = true;
+  }
+
+  applySettings();
+
+  const TALKER_NAMES = {
+    BD: '北斗', GB: '北斗', GP: 'GPS', GL: 'GLONASS',
+    GA: 'Galileo', GN: '多星系', GQ: 'QZSS', GI: 'NavIC', SB: 'SBAS'
+  };
+
+  const QUALITY = {
+    0: '無效', 1: '單點定位', 2: '差分定位', 3: 'PPS',
+    4: 'RTK 固定', 5: 'RTK 浮動', 6: '估算', 7: '手動', 8: '模擬'
+  };
+
+  const SKY_FLAGS = {
+    BD: 'cn', GP: 'us', GL: 'ru', GA: 'eu',
+    GQ: 'jp', GI: 'in', SB: 'sb', GN: 'sb'
+  };
+  const SKY_RING = {
+    BD: '#f87171', GP: '#4ade80', GL: '#facc15', GA: '#c084fc',
+    GQ: '#22d3ee', GI: '#fb923c', SB: '#94a3b8', GN: '#94a3b8'
+  };
+  const SKY_SYSTEMS = {
+    BD: '北斗', GP: 'GPS', GL: 'GLONASS', GA: 'Galileo',
+    GQ: 'QZSS', GI: 'NavIC', SB: 'SBAS', GN: '多星系'
+  };
+  const SKY_ORDER = ['BD', 'GP', 'GL', 'GA', 'GQ', 'GI', 'SB', 'GN'];
+  const SKY_TTL = 15000;
+  const skySats = new Map();
+  const usedSats = new Map();
+  const GSA_SYS = { 1: 'GP', 2: 'GL', 3: 'GA', 4: 'BD', 5: 'GQ', 6: 'GI' };
+  let gsaSeen = false;
+  let skyLegendHtml = null;
+
+  function systemKey(talker) {
+    return talker === 'GB' ? 'BD' : talker;
+  }
+
+  function parseGSV(sentence) {
+    const f = sentence.fields;
+    const talker = sentence.talker || String(f[0] || '').slice(0, 2).toUpperCase();
+    const sys = systemKey(talker);
+    const now = Date.now();
+    for (let i = 4; i + 3 < f.length; i += 4) {
+      const prn = num(f[i]);
+      const el = num(f[i + 1]);
+      const az = num(f[i + 2]);
+      const snr = num(f[i + 3]);
+      if (prn == null || el == null || az == null) continue;
+      if (el < 0 || el > 90 || az < 0 || az > 360) continue;
+      skySats.set(sys + ':' + prn, { sys, prn, el, az, snr, at: now });
+    }
+    pruneSky(now);
+    state.satsView = skySats.size;
+  }
+
+  function parseGSA(sentence) {
+    const f = sentence.fields;
+    let sys = systemKey(sentence.talker);
+    if (sys === 'GN' && f.length > 18) {
+      sys = GSA_SYS[num(f[18])] || 'GN';
+    }
+    const now = Date.now();
+    const fixType = num(f[2]);
+    if (fixType != null) gsaSeen = true;
+    if (fixType != null && fixType < 2) {
+      for (const key of usedSats.keys()) {
+        if (key.startsWith(sys + ':')) usedSats.delete(key);
+      }
+      return;
+    }
+    for (let i = 3; i <= 14 && i < f.length; i++) {
+      const prn = num(f[i]);
+      if (prn == null) continue;
+      usedSats.set(sys + ':' + prn, now);
+    }
+  }
+
+  function isUsedSat(sat, now) {
+    const exact = usedSats.get(sat.sys + ':' + sat.prn);
+    if (exact != null && now - exact <= SKY_TTL) return true;
+    const generic = usedSats.get('GN:' + sat.prn);
+    return generic != null && now - generic <= SKY_TTL;
+  }
+
+  function pruneSky(now) {
+    let changed = false;
+    for (const [key, sat] of skySats) {
+      if (now - sat.at > SKY_TTL) {
+        skySats.delete(key);
+        changed = true;
+      }
+    }
+    for (const [key, at] of usedSats) {
+      if (now - at > SKY_TTL) {
+        usedSats.delete(key);
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  const SKY_FLAG_CACHE = {};
+
+  function drawStar(ctx, cx, cy, r, color) {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    for (let i = 0; i < 10; i++) {
+      const rr = i % 2 === 0 ? r : r * 0.45;
+      const a = -Math.PI / 2 + (i * Math.PI) / 5;
+      const px = cx + Math.cos(a) * rr;
+      const py = cy + Math.sin(a) * rr;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  function paintFlag(ctx, code, x, y, w, h) {
+    switch (code) {
+      case 'cn':
+        ctx.fillStyle = '#de2910';
+        ctx.fillRect(x, y, w, h);
+        drawStar(ctx, x + w * 0.2, y + h * 0.32, h * 0.22, '#ffde00');
+        for (const [sx, sy] of [[0.38, 0.16], [0.52, 0.26], [0.52, 0.44], [0.38, 0.54]]) {
+          drawStar(ctx, x + w * sx, y + h * sy, h * 0.08, '#ffde00');
+        }
+        break;
+      case 'us': {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x, y, w, h);
+        ctx.fillStyle = '#b22234';
+        const band = h / 7;
+        for (let i = 0; i < 7; i += 2) ctx.fillRect(x, y + i * band, w, band);
+        ctx.fillStyle = '#3c3b6e';
+        ctx.fillRect(x, y, w * 0.42, h * 0.5);
+        ctx.fillStyle = '#ffffff';
+        for (let row = 0; row < 2; row++) {
+          for (let col = 0; col < 3; col++) {
+            ctx.beginPath();
+            ctx.arc(x + w * 0.09 + col * w * 0.12, y + h * 0.14 + row * h * 0.2, Math.max(1, h * 0.045), 0, Math.PI * 2);
+            ctx.fill();
+          }
+        }
+        break;
+      }
+      case 'ru':
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x, y, w, h / 3);
+        ctx.fillStyle = '#0039a6';
+        ctx.fillRect(x, y + h / 3, w, h / 3);
+        ctx.fillStyle = '#d52b1e';
+        ctx.fillRect(x, y + (h * 2) / 3, w, h / 3);
+        break;
+      case 'eu':
+        ctx.fillStyle = '#003399';
+        ctx.fillRect(x, y, w, h);
+        ctx.fillStyle = '#ffcc00';
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * Math.PI * 2;
+          ctx.beginPath();
+          ctx.arc(x + w / 2 + Math.cos(a) * h * 0.28, y + h / 2 + Math.sin(a) * h * 0.28, Math.max(1, h * 0.07), 0, Math.PI * 2);
+          ctx.fill();
+        }
+        break;
+      case 'jp':
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x, y, w, h);
+        ctx.fillStyle = '#bc002d';
+        ctx.beginPath();
+        ctx.arc(x + w / 2, y + h / 2, h * 0.3, 0, Math.PI * 2);
+        ctx.fill();
+        break;
+      case 'in':
+        ctx.fillStyle = '#ff9933';
+        ctx.fillRect(x, y, w, h / 3);
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(x, y + h / 3, w, h / 3);
+        ctx.fillStyle = '#138808';
+        ctx.fillRect(x, y + (h * 2) / 3, w, h / 3);
+        ctx.strokeStyle = '#000080';
+        ctx.lineWidth = Math.max(1, h * 0.06);
+        ctx.beginPath();
+        ctx.arc(x + w / 2, y + h / 2, h * 0.14, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+      default:
+        ctx.fillStyle = '#64748b';
+        ctx.fillRect(x, y, w, h);
+        ctx.strokeStyle = '#e2e8f0';
+        ctx.lineWidth = Math.max(1, h * 0.08);
+        ctx.beginPath();
+        ctx.arc(x + w / 2, y + h / 2, h * 0.26, 0, Math.PI * 2);
+        ctx.stroke();
+        ctx.beginPath();
+        ctx.ellipse(x + w / 2, y + h / 2, h * 0.26, h * 0.12, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        break;
+    }
+  }
+
+  function drawFlag(ctx, code, cx, cy, r, used) {
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.clip();
+    const h = r * 2;
+    const w = h * 1.5;
+    paintFlag(ctx, code, cx - w / 2, cy - h / 2, w, h);
+    ctx.restore();
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    if (used === false) {
+      ctx.strokeStyle = 'rgba(226, 232, 240, .55)';
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([5, 4]);
+    } else {
+      ctx.strokeStyle = 'rgba(255, 255, 255, .9)';
+      ctx.lineWidth = 2;
+    }
+    ctx.stroke();
+    ctx.setLineDash([]);
+  }
+
+  function skyFlagUrl(sys) {
+    const code = SKY_FLAGS[sys] || 'sb';
+    if (!SKY_FLAG_CACHE[code]) {
+      const size = 96;
+      const c = document.createElement('canvas');
+      c.width = size;
+      c.height = size;
+      drawFlag(c.getContext('2d'), code, size / 2, size / 2, size / 2 - 4);
+      SKY_FLAG_CACHE[code] = c.toDataURL('image/png');
+    }
+    return SKY_FLAG_CACHE[code];
+  }
+
+  function snrColor(snr) {
+    if (snr >= 45) return '#4ade80';
+    if (snr >= 35) return '#a3e635';
+    if (snr >= 25) return '#facc15';
+    return '#fb923c';
+  }
+
+  function drawSkyplot() {
+    const canvas = els.sky;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    const W = canvas.width;
+    const cx = W / 2;
+    const cy = W / 2;
+    const R = W / 2 - 30;
+    ctx.clearRect(0, 0, W, W);
+
+    ctx.beginPath();
+    ctx.arc(cx, cy, R, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(30, 41, 59, .55)';
+    ctx.fill();
+    ctx.lineWidth = 2;
+    ctx.strokeStyle = 'rgba(148, 163, 184, .75)';
+    ctx.stroke();
+
+    ctx.save();
+    ctx.setLineDash([7, 7]);
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(148, 163, 184, .32)';
+    for (const el of [30, 60]) {
+      ctx.beginPath();
+      ctx.arc(cx, cy, R * (90 - el) / 90, 0, Math.PI * 2);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    ctx.strokeStyle = 'rgba(148, 163, 184, .25)';
+    ctx.beginPath();
+    ctx.moveTo(cx - R, cy);
+    ctx.lineTo(cx + R, cy);
+    ctx.moveTo(cx, cy - R);
+    ctx.lineTo(cx, cy + R);
+    ctx.stroke();
+
+    ctx.fillStyle = 'rgba(226, 232, 240, .92)';
+    ctx.font = '600 24px "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText('N', cx, cy - R - 16);
+    ctx.fillText('S', cx, cy + R + 16);
+    ctx.fillText('E', cx + R + 16, cy);
+    ctx.fillText('W', cx - R - 16, cy);
+
+    if (skySats.size === 0) {
+      ctx.font = '400 18px "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(148, 163, 184, .8)';
+      ctx.fillText('等待衛星資料', cx, cy);
+      return;
+    }
+
+    const rad = Math.PI / 180;
+    const badgeR = 20;
+    const ringR = badgeR + 3.5;
+    const now = Date.now();
+    for (const sat of skySats.values()) {
+      const r = R * (90 - sat.el) / 90;
+      const x = cx + r * Math.sin(sat.az * rad);
+      const y = cy - r * Math.cos(sat.az * rad);
+      const used = gsaSeen ? isUsedSat(sat, now) : true;
+      ctx.save();
+      ctx.globalAlpha = used ? 1 : 0.45;
+      ctx.beginPath();
+      ctx.arc(x, y, ringR, 0, Math.PI * 2);
+      ctx.fillStyle = SKY_RING[sat.sys] || SKY_RING.GN;
+      ctx.fill();
+      drawFlag(ctx, SKY_FLAGS[sat.sys] || 'sb', x, y, badgeR, used);
+      ctx.restore();
+
+      const left = x > cx;
+      const tx = left ? x - ringR - 8 : x + ringR + 8;
+      ctx.textAlign = left ? 'right' : 'left';
+      ctx.textBaseline = 'middle';
+      ctx.font = '500 17px "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif';
+      ctx.fillStyle = 'rgba(226, 232, 240, .92)';
+      ctx.fillText(String(sat.prn), tx, sat.snr == null ? y : y - 8);
+      if (sat.snr != null) {
+        ctx.font = '600 13px "Segoe UI", "Microsoft JhengHei", system-ui, sans-serif';
+        ctx.fillStyle = snrColor(sat.snr);
+        ctx.fillText(Math.round(sat.snr) + ' dB', tx, y + 9);
+      }
+    }
+  }
+
+  function updateSkyMeta() {
+    const counts = {};
+    const usedCounts = {};
+    const snrSum = {};
+    const snrN = {};
+    const snrMax = {};
+    const now = Date.now();
+    let total = 0;
+    let usedTotal = 0;
+    let snrAll = 0;
+    let snrAllN = 0;
+    let snrBest = null;
+    for (const sat of skySats.values()) {
+      counts[sat.sys] = (counts[sat.sys] || 0) + 1;
+      total++;
+      if (isUsedSat(sat, now)) {
+        usedCounts[sat.sys] = (usedCounts[sat.sys] || 0) + 1;
+        usedTotal++;
+      }
+      if (sat.snr != null) {
+        snrSum[sat.sys] = (snrSum[sat.sys] || 0) + sat.snr;
+        snrN[sat.sys] = (snrN[sat.sys] || 0) + 1;
+        snrMax[sat.sys] = Math.max(snrMax[sat.sys] || 0, sat.snr);
+        snrAll += sat.snr;
+        snrAllN++;
+        snrBest = snrBest == null ? sat.snr : Math.max(snrBest, sat.snr);
+      }
+    }
+    els.skyCount.textContent = gsaSeen ? total + ' 顆 · 使用 ' + usedTotal : total + ' 顆';
+    els.skyAvg.textContent = snrAllN ? Math.round(snrAll / snrAllN) + ' dB-Hz' : '—';
+    els.skyBest.textContent = snrBest == null ? '—' : Math.round(snrBest) + ' dB-Hz';
+
+    let html = '';
+    for (const sys of SKY_ORDER) {
+      if (!counts[sys]) continue;
+      const used = usedCounts[sys] || 0;
+      const avg = snrN[sys] ? Math.round(snrSum[sys] / snrN[sys]) : null;
+      const best = snrMax[sys] == null ? null : Math.round(snrMax[sys]);
+      const countText = gsaSeen ? used + '/' + counts[sys] : String(counts[sys]);
+      const title = (SKY_SYSTEMS[sys] || sys) +
+        (gsaSeen ? '：使用 ' + used + '／可見 ' + counts[sys] : '：可見 ' + counts[sys]) +
+        '，平均 C/N0 ' + (avg == null ? '—' : avg + ' dB-Hz') +
+        '，最佳 ' + (best == null ? '—' : best + ' dB-Hz');
+      html += '<span title="' + title + '"><img src="' + skyFlagUrl(sys) + '" alt="">' +
+        (SKY_SYSTEMS[sys] || sys) + ' ' + countText +
+        (avg == null ? '' : ' · ' + avg) + '</span>';
+    }
+    if (html !== skyLegendHtml) {
+      skyLegendHtml = html;
+      els.skyLegend.innerHTML = html;
+    }
+  }
+
+  let rafId = 0;
+  function scheduleRender() {
+    if (rafId) return;
+    rafId = requestAnimationFrame(() => {
+      rafId = 0;
+      render();
+    });
+  }
+
+  function fmtCoord(value, pos, neg) {
+    if (value == null) return '—';
+    return Math.abs(value).toFixed(6) + '° ' + (value >= 0 ? pos : neg);
+  }
+
+  function fmtDMS(value, pos, neg) {
+    if (value == null) return '—';
+    const abs = Math.abs(value);
+    const deg = Math.floor(abs);
+    const minFloat = (abs - deg) * 60;
+    const min = Math.floor(minFloat);
+    const sec = (minFloat - min) * 60;
+    return deg + '°' + String(min).padStart(2, '0') + "'" +
+      sec.toFixed(2).padStart(5, '0') + '" ' + (value >= 0 ? pos : neg);
+  }
+
+  function tmForward(lat, lon, lon0, k0, falseEasting, falseNorthing) {
+    const a = 6378137;
+    const e2 = 0.00669438002290;
+    const ep2 = e2 / (1 - e2);
+    const rad = Math.PI / 180;
+    const phi = lat * rad;
+    const dl = (lon - lon0) * rad;
+    const sinPhi = Math.sin(phi);
+    const cosPhi = Math.cos(phi);
+    const tanPhi = Math.tan(phi);
+    const N = a / Math.sqrt(1 - e2 * sinPhi * sinPhi);
+    const T = tanPhi * tanPhi;
+    const C = ep2 * cosPhi * cosPhi;
+    const A = dl * cosPhi;
+    const M = a * (
+      (1 - e2 / 4 - 3 * e2 * e2 / 64 - 5 * e2 * e2 * e2 / 256) * phi -
+      (3 * e2 / 8 + 3 * e2 * e2 / 32 + 45 * e2 * e2 * e2 / 1024) * Math.sin(2 * phi) +
+      (15 * e2 * e2 / 256 + 45 * e2 * e2 * e2 / 1024) * Math.sin(4 * phi) -
+      (35 * e2 * e2 * e2 / 3072) * Math.sin(6 * phi)
+    );
+    const A2 = A * A;
+    const A3 = A2 * A;
+    const A4 = A3 * A;
+    const A5 = A4 * A;
+    const A6 = A5 * A;
+    const east = falseEasting + k0 * N * (
+      A + (1 - T + C) * A3 / 6 +
+      (5 - 18 * T + T * T + 72 * C - 58 * ep2) * A5 / 120
+    );
+    const north = falseNorthing + k0 * (
+      M + N * tanPhi * (
+        A2 / 2 +
+        (5 - T + 9 * C + 4 * C * C) * A4 / 24 +
+        (61 - 58 * T + T * T + 600 * C - 330 * ep2) * A6 / 720
+      )
+    );
+    return { east, north };
+  }
+
+  function coordDisplay() {
+    if (state.lat == null || state.lon == null) return '—';
+    switch (els.coordFormat.value) {
+      case 'dms':
+        return fmtDMS(state.lat, 'N', 'S') + ', ' + fmtDMS(state.lon, 'E', 'W');
+      case 'twd97': {
+        const p = tmForward(state.lat, state.lon, 121, 0.9999, 250000, 0);
+        return 'TWD97 E ' + p.east.toFixed(2) + ' · N ' + p.north.toFixed(2);
+      }
+      case 'utm': {
+        const p = tmForward(state.lat, state.lon, 123, 0.9996, 500000, 0);
+        return 'UTM 51N E ' + p.east.toFixed(2) + ' · N ' + p.north.toFixed(2);
+      }
+      default:
+        return fmtCoord(state.lat, 'N', 'S') + ', ' + fmtCoord(state.lon, 'E', 'W');
+    }
+  }
+
+  function qualityText() {
+    if (state.fixQuality == null) return '—';
+    const q = QUALITY[state.fixQuality] || ('Q' + state.fixQuality);
+    if (state.hdop == null) return q;
+    return q + ' · HDOP ' + state.hdop.toFixed(1) + '（' + hdopRating(state.hdop) + '）';
+  }
+
+  async function copyCoord() {
+    const text = coordDisplay();
+    if (text === '—') return;
+    try {
+      if (!navigator.clipboard || !navigator.clipboard.writeText) throw new Error('no clipboard');
+      await navigator.clipboard.writeText(text);
+      els.copy.textContent = '已複製';
+    } catch (e) {
+      els.copy.textContent = '複製失敗';
+    }
+    setTimeout(() => { els.copy.textContent = '複製'; }, 1200);
+  }
+
+  let audioCtx = null;
+
+  function ensureAudio() {
+    try {
+      if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+      if (audioCtx.state === 'suspended') audioCtx.resume();
+    } catch (e) { /* 無音訊支援 */ }
+  }
+
+  function beep() {
+    try {
+      ensureAudio();
+      if (!audioCtx) return;
+      const osc = audioCtx.createOscillator();
+      const gain = audioCtx.createGain();
+      osc.type = 'sine';
+      osc.frequency.value = 880;
+      gain.gain.setValueAtTime(0.0001, audioCtx.currentTime);
+      gain.gain.exponentialRampToValueAtTime(0.22, audioCtx.currentTime + 0.02);
+      gain.gain.exponentialRampToValueAtTime(0.0001, audioCtx.currentTime + 0.35);
+      osc.connect(gain).connect(audioCtx.destination);
+      osc.start();
+      osc.stop(audioCtx.currentTime + 0.4);
+    } catch (e) { /* 忽略音訊錯誤 */ }
+  }
+
+  function openCoordMap(kind) {
+    if (state.lat == null || state.lon == null) {
+      setStatus('warn', '尚未取得座標');
+      return;
+    }
+    const lat = state.lat.toFixed(7);
+    const lon = state.lon.toFixed(7);
+    const url = kind === 'gmaps'
+      ? 'https://www.google.com/maps?q=' + lat + ',' + lon
+      : 'https://www.openstreetmap.org/?mlat=' + lat + '&mlon=' + lon +
+        '#map=17/' + lat + '/' + lon;
+    window.open(url, '_blank', 'noopener');
+  }
+
+  function fixText() {
+    if (!connected && !replay.active) return '—';
+    if (!state.hasFix) return state.lastPosAt ? '訊號中斷' : '等待定位';
+    const parts = [];
+    if (state.fixType === 2) parts.push('2D');
+    else if (state.fixType === 3) parts.push('3D');
+    if (state.fixQuality >= 1) parts.push(QUALITY[state.fixQuality] || '定位');
+    return parts.join(' · ') || '已定位';
+  }
+
+  function render() {
+    els.coord.textContent = coordDisplay();
+    els.street.textContent = state.street || '—';
+    els.fix.textContent = fixText();
+    const fixField = els.fix.parentElement;
+    fixField.classList.toggle('rtk', state.fixQuality === 4);
+    fixField.classList.toggle('float', state.fixQuality === 5);
+    fixField.classList.toggle('bad', connected && !state.hasFix && state.lastPosAt > 0);
+    els.talker.textContent = state.talker
+      ? (TALKER_NAMES[state.talker] || state.talker) + '（' + state.talker + '）'
+      : '—';
+    els.sats.textContent = (state.satsUsed == null && state.satsView == null)
+      ? '—'
+      : (state.satsUsed == null ? '–' : state.satsUsed) + ' / ' + (state.satsView == null ? '–' : state.satsView);
+    els.hdop.textContent = state.hdop == null ? '—' : state.hdop.toFixed(2);
+    els.alt.textContent = state.alt == null ? '—' : state.alt.toFixed(1) + ' m';
+    els.speed.textContent = state.speedKmh == null ? '—' : state.speedKmh.toFixed(1) + ' km/h';
+    els.course.textContent = state.course == null ? '—' : state.course.toFixed(0) + '°';
+    els.date.textContent = state.date || '—';
+    els.utc.textContent = state.utcTime || '—';
+    els.utc8.textContent = state.utc8Time || '—';
+
+    els.pdop.textContent = state.pdop == null ? '—' : state.pdop.toFixed(1);
+    els.vdop.textContent = state.vdop == null ? '—' : state.vdop.toFixed(1);
+    els.rate.textContent = connected ? state.rate + ' 句/s' : '—';
+    els.errCount.textContent = (state.checksumErrors || connected || replay.active)
+      ? String(state.checksumErrors) : '—';
+
+    const hasTrack = track.length > 0;
+    const avg = trip.movingMs > 0 ? (trip.dist / 1000) / (trip.movingMs / 3600000) : null;
+    els.dist.textContent = hasTrack ? fmtDistance(trip.dist) : '—';
+    els.move.textContent = hasTrack && trip.movingMs ? fmtDuration(trip.movingMs) : '—';
+    els.avg.textContent = avg != null && isFinite(avg) ? avg.toFixed(1) + ' km/h' : '—';
+    els.maxSpeed.textContent = hasTrack && trip.maxSpeed ? trip.maxSpeed.toFixed(1) + ' km/h' : '—';
+    els.ascent.textContent = hasTrack ? '+' + trip.ascent.toFixed(1) + ' m' : '—';
+    els.descent.textContent = hasTrack ? '-' + trip.descent.toFixed(1) + ' m' : '—';
+    els.quality.textContent = qualityText();
+
+    updateHeading();
+    drawSkyplot();
+    updateSkyMeta();
+  }
+
+  function updateHeading() {
+    if (!markerEl) return;
+    const moving = state.hasFix && state.course != null &&
+      (state.speedKmh == null || state.speedKmh >= 1);
+    markerEl.classList.toggle('moving', moving);
+    if (!moving || !headingEl) return;
+    const delta = ((state.course - headingDeg + 540) % 360) - 180;
+    headingDeg += delta;
+    headingEl.style.transform = 'rotate(' + headingDeg.toFixed(1) + 'deg)';
+  }
+
+  function num(value) {
+    if (value == null || value === '') return null;
+    const n = parseFloat(value);
+    return Number.isFinite(n) ? n : null;
+  }
+
+  function parseCoord(value, hemi) {
+    const n = num(value);
+    if (n == null || !hemi) return null;
+    const deg = Math.floor(n / 100);
+    const min = n - deg * 100;
+    if (!(min >= 0 && min < 60)) return null;
+    const sign = (hemi === 'S' || hemi === 'W') ? -1 : 1;
+    return sign * (deg + min / 60);
+  }
+
+  function rmcDateTime(time, date) {
+    const t = /^(\d{2})(\d{2})(\d{2})(?:\.\d+)?$/.exec(time || '');
+    const d = /^(\d{2})(\d{2})(\d{2})$/.exec(date || '');
+    if (!t || !d) return null;
+    const utc = new Date(Date.UTC(
+      2000 + Number(d[3]), Number(d[2]) - 1, Number(d[1]),
+      Number(t[1]), Number(t[2]), Number(t[3])
+    ));
+    if (isNaN(utc)) return null;
+    const pad = (n) => String(n).padStart(2, '0');
+    const hms = (dt) => pad(dt.getUTCHours()) + ':' + pad(dt.getUTCMinutes()) + ':' + pad(dt.getUTCSeconds());
+    const utc8 = new Date(utc.getTime() + 8 * 3600 * 1000);
+    const dayShift = Math.round((Date.UTC(utc8.getUTCFullYear(), utc8.getUTCMonth(), utc8.getUTCDate()) -
+      Date.UTC(utc.getUTCFullYear(), utc.getUTCMonth(), utc.getUTCDate())) / 86400000);
+    return {
+      date: pad(utc.getUTCFullYear()) + '-' + pad(utc.getUTCMonth() + 1) + '-' + pad(utc.getUTCDate()),
+      utc: hms(utc),
+      utc8: hms(utc8) + (dayShift > 0 ? '（+' + dayShift + ' 日）' : ''),
+      epoch: utc.getTime(),
+      dayStart: Date.UTC(2000 + Number(d[3]), Number(d[2]) - 1, Number(d[1]))
+    };
+  }
+
+  function ggaEpoch(dayStart, time) {
+    if (dayStart == null) return null;
+    const m = /^(\d{2})(\d{2})(\d{2})/.exec(time || '');
+    if (!m) return null;
+    return dayStart + Number(m[1]) * 3600000 + Number(m[2]) * 60000 + Number(m[3]) * 1000;
+  }
+
+  function xorSum(text) {
+    let sum = 0;
+    for (let i = 0; i < text.length; i++) sum ^= text.charCodeAt(i);
+    return sum;
+  }
+
+  function parseSentence(line) {
+    if (line[0] !== '$' && line[0] !== '!') return null;
+    let body = line.slice(1);
+    let checksumOk = null;
+    const star = body.lastIndexOf('*');
+    if (star !== -1) {
+      const hex = body.slice(star + 1).trim();
+      body = body.slice(0, star);
+      if (/^[0-9A-Fa-f]{2}$/.test(hex)) checksumOk = xorSum(body) === parseInt(hex, 16);
+    }
+    const fields = body.split(',');
+    if (!fields[0] || fields[0].length < 5) return null;
+    return {
+      talker: fields[0].slice(0, 2).toUpperCase(),
+      kind: fields[0].slice(-3).toUpperCase(),
+      fields,
+      checksumOk
+    };
+  }
+
+  function haversine(lat1, lon1, lat2, lon2) {
+    const R = 6371000;
+    const rad = Math.PI / 180;
+    const dLat = (lat2 - lat1) * rad;
+    const dLon = (lon2 - lon1) * rad;
+    const a = Math.sin(dLat / 2) ** 2 +
+      Math.cos(lat1 * rad) * Math.cos(lat2 * rad) * Math.sin(dLon / 2) ** 2;
+    return 2 * R * Math.asin(Math.sqrt(a));
+  }
+
+  function fmtDuration(ms) {
+    const total = Math.max(0, Math.round(ms / 1000));
+    const h = Math.floor(total / 3600);
+    const m = Math.floor((total % 3600) / 60);
+    const s = total % 60;
+    const pad = (n) => String(n).padStart(2, '0');
+    return (h ? h + ':' + pad(m) : m) + ':' + pad(s);
+  }
+
+  function fmtDistance(m) {
+    if (m == null) return '—';
+    return m < 1000 ? m.toFixed(0) + ' m' : (m / 1000).toFixed(2) + ' km';
+  }
+
+  function hdopRating(h) {
+    if (h == null) return '—';
+    if (h <= 1) return '優';
+    if (h <= 2) return '良';
+    if (h <= 5) return '中';
+    return '差';
+  }
+
+  function resetTrip() {
+    trip = { dist: 0, movingMs: 0, maxSpeed: 0, ascent: 0, descent: 0 };
+  }
+
+  function noteSpeed(kmh) {
+    if (kmh != null && kmh >= 0) trip.maxSpeed = Math.max(trip.maxSpeed, kmh);
+  }
+
+  function addTrackPoint(lat, lon) {
+    const now = Date.now();
+    const last = track[track.length - 1];
+    const hasFixTime = Number.isFinite(state.fixTime);
+    let t = hasFixTime ? state.fixTime : now;
+    if (last && t < last.t) t = last.t;
+    if (last) {
+      const d = haversine(last.lat, last.lon, lat, lon);
+      if (d < 1.5) return;
+      trip.dist += d;
+      const dt = t - last.t;
+      if (dt > 0 && dt <= 10000 && (state.speedKmh == null || state.speedKmh >= 1)) {
+        trip.movingMs += dt;
+      }
+      if (last.alt != null && state.alt != null) {
+        const dAlt = state.alt - last.alt;
+        if (dAlt > 0.8) trip.ascent += dAlt;
+        else if (dAlt < -0.8) trip.descent += -dAlt;
+      }
+    }
+    if (state.speedKmh != null) trip.maxSpeed = Math.max(trip.maxSpeed, state.speedKmh);
+    track.push({
+      lat,
+      lon,
+      t,
+      wall: !hasFixTime,
+      alt: state.alt,
+      speed: state.speedKmh,
+      hdop: state.hdop
+    });
+    if (track.length > 5000) track.splice(0, track.length - 5000);
+    updateTrackSource();
+  }
+
+  function recomputeTrip() {
+    resetTrip();
+    for (let i = 1; i < track.length; i++) {
+      const a = track[i - 1];
+      const b = track[i];
+      trip.dist += haversine(a.lat, a.lon, b.lat, b.lon);
+      if (a.t && b.t) {
+        const dt = b.t - a.t;
+        if (dt > 0 && dt <= 10000 && (b.speed == null || b.speed >= 1)) trip.movingMs += dt;
+      }
+      if (b.speed != null) trip.maxSpeed = Math.max(trip.maxSpeed, b.speed);
+      if (a.alt != null && b.alt != null) {
+        const dAlt = b.alt - a.alt;
+        if (dAlt > 0.8) trip.ascent += dAlt;
+        else if (dAlt < -0.8) trip.descent += -dAlt;
+      }
+    }
+  }
+
+  function downloadText(name, text, mime) {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function stamp() {
+    const d = new Date();
+    const p = (n) => String(n).padStart(2, '0');
+    return d.getFullYear() + p(d.getMonth() + 1) + p(d.getDate()) + '_' +
+      p(d.getHours()) + p(d.getMinutes()) + p(d.getSeconds());
+  }
+
+  function isoTime(ms) {
+    return new Date(ms).toISOString();
+  }
+
+  function buildGpx() {
+    const pts = track.map((p) => {
+      const parts = ['      <trkpt lat="' + p.lat.toFixed(8) + '" lon="' + p.lon.toFixed(8) + '">'];
+      if (p.alt != null) parts.push('        <ele>' + p.alt.toFixed(1) + '</ele>');
+      if (p.t) parts.push('        <time>' + isoTime(p.t) + '</time>');
+      parts.push('      </trkpt>');
+      return parts.join('\n');
+    }).join('\n');
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<gpx version="1.1" creator="BDS Antenna Reader" xmlns="http://www.topografix.com/GPX/1/1">\n' +
+      '  <metadata><name>北斗軌跡</name></metadata>\n' +
+      '  <trk><name>北斗軌跡 ' + stamp() + '</name><trkseg>\n' +
+      pts + '\n  </trkseg></trk>\n</gpx>\n';
+  }
+
+  function buildGeoJson() {
+    const last = track[track.length - 1];
+    return JSON.stringify({
+      type: 'FeatureCollection',
+      features: [{
+        type: 'Feature',
+        properties: {
+          name: '北斗軌跡',
+          start: track[0].t ? isoTime(track[0].t) : null,
+          end: last.t ? isoTime(last.t) : null,
+          distance_m: Math.round(trip.dist),
+          moving_ms: trip.movingMs,
+          max_speed_kmh: Number(trip.maxSpeed.toFixed(2))
+        },
+        geometry: {
+          type: 'LineString',
+          coordinates: track.map((p) => p.alt == null ? [p.lon, p.lat] : [p.lon, p.lat, p.alt])
+        }
+      }]
+    }, null, 2);
+  }
+
+  function buildKml() {
+    const coords = track.map((p) => p.lon.toFixed(8) + ',' + p.lat.toFixed(8) +
+      (p.alt == null ? '' : ',' + p.alt.toFixed(1))).join(' ');
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' +
+      '<kml xmlns="http://www.opengis.net/kml/2.2">\n' +
+      '  <Document><name>北斗軌跡</name><Placemark><name>' + stamp() + '</name>' +
+      '<LineString><tessellate>1</tessellate><coordinates>\n' +
+      coords + '\n</coordinates></LineString></Placemark></Document>\n</kml>\n';
+  }
+
+  function buildCsv() {
+    const rows = ['time_iso,lat,lon,alt_m,speed_kmh,hdop'];
+    for (const p of track) {
+      rows.push([
+        p.t ? isoTime(p.t) : '',
+        p.lat.toFixed(8),
+        p.lon.toFixed(8),
+        p.alt == null ? '' : p.alt.toFixed(1),
+        p.speed == null ? '' : p.speed.toFixed(2),
+        p.hdop == null ? '' : p.hdop.toFixed(2)
+      ].join(','));
+    }
+    return '\uFEFF' + rows.join('\n') + '\n';
+  }
+
+  function exportTrack() {
+    if (track.length < 2) {
+      setStatus('warn', '目前沒有足夠的軌跡可匯出');
+      return;
+    }
+    const format = els.exportFormat.value;
+    const base = 'bds_track_' + stamp();
+    if (format === 'gpx') downloadText(base + '.gpx', buildGpx(), 'application/gpx+xml');
+    else if (format === 'geojson') downloadText(base + '.geojson', buildGeoJson(), 'application/geo+json');
+    else if (format === 'kml') downloadText(base + '.kml', buildKml(), 'application/vnd.google-earth.kml+xml');
+    else downloadText(base + '.csv', buildCsv(), 'text/csv;charset=utf-8');
+    setStatus('ok', '已匯出 ' + format.toUpperCase() + '（' + track.length + ' 點）');
+  }
+
+  function fitTrack() {
+    if (!map || !track.length) return;
+    els.follow.checked = false;
+    saveSettings();
+    if (track.length === 1) {
+      map.flyTo({ center: [track[0].lon, track[0].lat], zoom: Math.max(map.getZoom(), 16) });
+      return;
+    }
+    const bounds = new maplibregl.LngLatBounds();
+    for (const p of track) bounds.extend([p.lon, p.lat]);
+    map.fitBounds(bounds, { padding: 60, maxZoom: 17, duration: 800 });
+  }
+
+  function childText(el, name) {
+    for (const c of el.children) {
+      if (c.localName === name) return c.textContent;
+    }
+    return null;
+  }
+
+  function parseGeoJsonTrack(text) {
+    const obj = JSON.parse(text);
+    const out = [];
+    const addCoords = (coords) => {
+      if (!Array.isArray(coords)) return;
+      for (const c of coords) {
+        if (!Array.isArray(c)) continue;
+        const lon = Number(c[0]);
+        const lat = Number(c[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        out.push({
+          lat,
+          lon,
+          alt: c.length > 2 && Number.isFinite(Number(c[2])) ? Number(c[2]) : null,
+          t: null,
+          speed: null
+        });
+      }
+    };
+    const visit = (g) => {
+      if (!g) return;
+      if (g.type === 'FeatureCollection') (g.features || []).forEach(visit);
+      else if (g.type === 'Feature') visit(g.geometry);
+      else if (g.type === 'LineString') addCoords(g.coordinates);
+      else if (g.type === 'MultiLineString') (g.coordinates || []).forEach(addCoords);
+      else if (g.type === 'Point') addCoords([g.coordinates]);
+      else if (g.type === 'MultiPoint') addCoords(g.coordinates);
+    };
+    visit(obj);
+    return out;
+  }
+
+  function parseGpxTrack(doc) {
+    return Array.from(doc.getElementsByTagName('trkpt')).map((el) => {
+      const lat = parseFloat(el.getAttribute('lat'));
+      const lon = parseFloat(el.getAttribute('lon'));
+      const time = Date.parse(childText(el, 'time') || '');
+      return {
+        lat,
+        lon,
+        alt: num(childText(el, 'ele')),
+        t: Number.isFinite(time) ? time : null,
+        speed: null
+      };
+    }).filter((p) => Number.isFinite(p.lat) && Number.isFinite(p.lon));
+  }
+
+  function parseKmlTrack(doc) {
+    const out = [];
+    for (const el of doc.getElementsByTagName('coordinates')) {
+      for (const tuple of (el.textContent || '').trim().split(/\s+/)) {
+        const parts = tuple.split(',');
+        const lon = Number(parts[0]);
+        const lat = Number(parts[1]);
+        if (!Number.isFinite(lat) || !Number.isFinite(lon)) continue;
+        out.push({
+          lat,
+          lon,
+          alt: parts.length > 2 && Number.isFinite(Number(parts[2])) ? Number(parts[2]) : null,
+          t: null,
+          speed: null
+        });
+      }
+    }
+    return out;
+  }
+
+  async function importTrackFile(file) {
+    try {
+      const text = await file.text();
+      let pts;
+      if (/^\s*</.test(text)) {
+        const doc = new DOMParser().parseFromString(text, 'application/xml');
+        if (doc.getElementsByTagName('parsererror').length) throw new Error('XML 格式錯誤');
+        pts = parseGpxTrack(doc);
+        if (!pts.length) pts = parseKmlTrack(doc);
+      } else {
+        pts = parseGeoJsonTrack(text);
+      }
+      if (!pts.length) throw new Error('找不到軌跡點');
+      for (let i = 1; i < pts.length; i++) {
+        const a = pts[i - 1];
+        const b = pts[i];
+        if (a.t && b.t && b.t > a.t) {
+          b.speed = (haversine(a.lat, a.lon, b.lat, b.lon) / 1000) / ((b.t - a.t) / 3600000);
+        }
+      }
+      track = pts.slice(-5000);
+      recomputeTrip();
+      updateTrackSource();
+      updateAccuracySource();
+      fitTrack();
+      scheduleRender();
+      setStatus('ok', '已匯入 ' + track.length + ' 個軌跡點');
+    } catch (err) {
+      setStatus('err', '匯入失敗：' + (err.message || err.name));
+    }
+  }
+
+  function setPosition(lat, lon, talker) {
+    state.lat = lat;
+    state.lon = lon;
+    state.hasFix = true;
+    state.lastPosAt = Date.now();
+    if (talker) state.talker = talker;
+
+    if (map) {
+      const isFirst = !marker;
+      if (isFirst) {
+        markerEl = document.createElement('div');
+        markerEl.className = 'gps-marker';
+        headingEl = document.createElement('div');
+        headingEl.className = 'gps-heading';
+        markerEl.appendChild(headingEl);
+        marker = new maplibregl.Marker({ element: markerEl, anchor: 'center' });
+        marker.setLngLat([lon, lat]).addTo(map);
+      } else {
+        markerEl.classList.remove('stale');
+        marker.setLngLat([lon, lat]);
+      }
+
+      lastAccuracy = circlePolygon(lat, lon, Math.max(3, (state.hdop == null ? 1.5 : state.hdop) * 5));
+      updateAccuracySource();
+
+      if (isFirst) {
+        map.jumpTo({ center: [lon, lat], zoom: 16 });
+      } else if (els.follow.checked) {
+        map.easeTo({ center: [lon, lat], duration: 500 });
+      }
+    }
+
+    addTrackPoint(lat, lon);
+    updateStreet();
+    scheduleRender();
+  }
+
+  function handleSentence(sentence) {
+    if (sentence.checksumOk === false) return;
+    const f = sentence.fields;
+
+    switch (sentence.kind) {
+      case 'GGA': {
+        const gt = ggaEpoch(state.dayStart, f[1]);
+        if (gt != null) state.fixTime = gt;
+        const lat = parseCoord(f[2], f[3]);
+        const lon = parseCoord(f[4], f[5]);
+        const q = num(f[6]);
+        if (q != null) state.fixQuality = q;
+        if (num(f[7]) != null) state.satsUsed = num(f[7]);
+        if (num(f[8]) != null) state.hdop = num(f[8]);
+        if (num(f[9]) != null) state.alt = num(f[9]);
+        if (lat != null && lon != null && q != null && q >= 1) {
+          setPosition(lat, lon, sentence.talker);
+        }
+        break;
+      }
+      case 'RMC': {
+        const dt = rmcDateTime(f[1], f[9]);
+        if (dt) {
+          state.date = dt.date;
+          state.utcTime = dt.utc;
+          state.utc8Time = dt.utc8;
+          state.fixTime = dt.epoch;
+          state.dayStart = dt.dayStart;
+          const last = track[track.length - 1];
+          if (last && last.wall) {
+            last.t = dt.epoch;
+            last.wall = false;
+          }
+        }
+        const knots = num(f[7]);
+        if (knots != null) {
+          state.speedKmh = knots * 1.852;
+          noteSpeed(state.speedKmh);
+        }
+        if (num(f[8]) != null) state.course = num(f[8]);
+        const lat = parseCoord(f[3], f[4]);
+        const lon = parseCoord(f[5], f[6]);
+        if (f[2] === 'A' && lat != null && lon != null) {
+          setPosition(lat, lon, sentence.talker);
+        }
+        break;
+      }
+      case 'GLL': {
+        const lat = parseCoord(f[1], f[2]);
+        const lon = parseCoord(f[3], f[4]);
+        if (f[6] === 'A' && lat != null && lon != null) {
+          setPosition(lat, lon, sentence.talker);
+        }
+        break;
+      }
+      case 'GSA': {
+        if (num(f[2]) != null) state.fixType = num(f[2]);
+        if (num(f[15]) != null) state.pdop = num(f[15]);
+        if (num(f[17]) != null) state.vdop = num(f[17]);
+        parseGSA(sentence);
+        break;
+      }
+      case 'GSV': {
+        parseGSV(sentence);
+        break;
+      }
+      case 'VTG': {
+        if (num(f[7]) != null) {
+          state.speedKmh = num(f[7]);
+          noteSpeed(state.speedKmh);
+        }
+        if (num(f[1]) != null) state.course = num(f[1]);
+        break;
+      }
+      default:
+        break;
+    }
+
+    scheduleRender();
+  }
+
+  let buffer = '';
+  const rawLines = [];
+
+  let recording = false;
+  let recorded = [];
+  let recordStart = 0;
+  let recordedSaved = false;
+  const replay = {
+    data: [],
+    idx: 0,
+    duration: 0,
+    offset: 0,
+    lastElapsed: 0,
+    wallStart: 0,
+    playing: false,
+    active: false,
+    started: false,
+    timer: 0
+  };
+
+  function pushRecord(line) {
+    if (!recording) return;
+    recorded.push({ t: Date.now() - recordStart, line });
+    if (recorded.length > 200000) recorded.splice(0, 1000);
+  }
+
+  function updateRecordUi() {
+    els.record.textContent = recording ? '停止錄製' : '開始錄製';
+    els.record.classList.toggle('danger', recording);
+    els.saveRec.disabled = !recorded.length;
+    if (recording) {
+      els.recCount.textContent = '錄製中 · ' + recorded.length + ' 句';
+    } else if (recorded.length) {
+      els.recCount.textContent = recorded.length + ' 句' + (recordedSaved ? '（已儲存）' : '（未儲存）');
+    } else {
+      els.recCount.textContent = '未錄製';
+    }
+  }
+
+  function toggleRecording() {
+    if (!recording) {
+      if (replay.playing) return;
+      recorded = [];
+      recordedSaved = false;
+      recordStart = Date.now();
+      recording = true;
+    } else {
+      recording = false;
+    }
+    updateRecordUi();
+  }
+
+  function saveRecording() {
+    if (!recorded.length) return;
+    const text = recorded.map((r) => JSON.stringify({ t: r.t, l: r.line })).join('\n') + '\n';
+    downloadText('bds_nmea_' + stamp() + '.jsonl', text, 'application/x-ndjson');
+    recordedSaved = true;
+    updateRecordUi();
+  }
+
+  function resetReplayState() {
+    buffer = '';
+    state.lat = null;
+    state.lon = null;
+    state.street = '';
+    state.hasFix = false;
+    state.fixQuality = 0;
+    state.fixType = 0;
+    state.satsUsed = null;
+    state.satsView = null;
+    state.hdop = null;
+    state.alt = null;
+    state.speedKmh = null;
+    state.course = null;
+    state.date = '';
+    state.utcTime = '';
+    state.utc8Time = '';
+    state.talker = '';
+    state.pdop = null;
+    state.vdop = null;
+    state.fixTime = null;
+    state.dayStart = null;
+    state.checksumErrors = 0;
+    state.rate = 0;
+    state.lastSentenceAt = 0;
+    state.lastPosAt = 0;
+    skySats.clear();
+    usedSats.clear();
+    gsaSeen = false;
+    track = [];
+    resetTrip();
+    if (marker) {
+      marker.remove();
+      marker = null;
+      markerEl = null;
+      headingEl = null;
+    }
+    lastAccuracy = null;
+    updateAccuracySource();
+    updateTrackSource();
+    scheduleRender();
+  }
+
+  async function loadReplayFile(file) {
+    if (port) {
+      setStatus('warn', '回放前請先中斷序列埠連線');
+      return;
+    }
+    try {
+      const text = await file.text();
+      const rows = [];
+      let base = null;
+      let lastT = 0;
+      for (const raw of text.split(/\r?\n/)) {
+        const line = raw.trim();
+        if (!line) continue;
+        let t = null;
+        let body = line;
+        if (line[0] === '{') {
+          try {
+            const obj = JSON.parse(line);
+            body = obj.l || obj.line;
+            t = Number(obj.t);
+          } catch (e) {
+            continue;
+          }
+          if (typeof body !== 'string' || !Number.isFinite(t)) continue;
+        }
+        if (base == null) base = t == null ? 0 : t;
+        t = t == null ? lastT + 100 : t - base;
+        if (t < lastT) t = lastT;
+        lastT = t;
+        rows.push({ t, line: body });
+      }
+      if (!rows.length) throw new Error('檔案中沒有 NMEA 資料');
+      if (recording) toggleRecording();
+      if (replay.playing) pauseReplay();
+      replay.data = rows;
+      replay.idx = 0;
+      replay.duration = Math.max(1, rows[rows.length - 1].t);
+      replay.offset = 0;
+      replay.lastElapsed = 0;
+      replay.active = true;
+      replay.started = false;
+      els.replayBtn.disabled = false;
+      els.replayStop.disabled = false;
+      els.replaySpeed.disabled = false;
+      els.replaySeek.disabled = false;
+      els.replaySeek.value = '0';
+      els.replayBtn.textContent = '播放';
+      els.replayTime.textContent = '0:00 / ' + fmtDuration(replay.duration);
+      setStatus('idle', '已載入回放：' + rows.length + ' 句');
+    } catch (err) {
+      setStatus('err', '回放載入失敗：' + (err.message || err.name));
+    }
+  }
+
+  function replayElapsed() {
+    const speed = Number(els.replaySpeed.value);
+    const mult = speed > 0 ? speed : 1e9;
+    return replay.offset + (performance.now() - replay.wallStart) * mult;
+  }
+
+  function playReplay() {
+    if (!replay.data.length || replay.playing) return;
+    if (!replay.started) {
+      resetReplayState();
+      replay.started = true;
+      replay.idx = 0;
+      replay.offset = 0;
+    } else if (replay.idx >= replay.data.length) {
+      resetReplayState();
+      replay.idx = 0;
+      replay.offset = 0;
+      replay.lastElapsed = 0;
+    }
+    replay.playing = true;
+    replay.wallStart = performance.now();
+    els.replayBtn.textContent = '暫停';
+    if (!replay.timer) replay.timer = setInterval(tickReplay, 50);
+  }
+
+  function pauseReplay() {
+    if (!replay.playing) return;
+    replay.offset = Math.min(replay.duration, Math.max(0, replayElapsed()));
+    replay.lastElapsed = replay.offset;
+    replay.playing = false;
+    els.replayBtn.textContent = '播放';
+    if (replay.timer) {
+      clearInterval(replay.timer);
+      replay.timer = 0;
+    }
+  }
+
+  function tickReplay() {
+    if (!replay.playing) return;
+    const elapsed = Math.min(replay.duration, Math.max(0, replayElapsed()));
+    replay.lastElapsed = elapsed;
+    let guard = 0;
+    while (replay.idx < replay.data.length &&
+           replay.data[replay.idx].t <= elapsed && guard++ < 5000) {
+      handleLine(replay.data[replay.idx].line);
+      replay.idx++;
+    }
+    if (replay.duration > 0) {
+      els.replaySeek.value = String(Math.round(elapsed / replay.duration * 1000));
+    }
+    els.replayTime.textContent = fmtDuration(elapsed) + ' / ' + fmtDuration(replay.duration);
+    if (replay.idx >= replay.data.length) {
+      pauseReplay();
+      setStatus('idle', '回放結束');
+    }
+  }
+
+  function seekReplay(fraction) {
+    if (!replay.data.length) return;
+    const wasPlaying = replay.playing;
+    if (wasPlaying) pauseReplay();
+    resetReplayState();
+    replay.started = true;
+    replay.idx = 0;
+    const target = Math.max(0, Math.min(1, fraction)) * replay.duration;
+    let guard = 0;
+    while (replay.idx < replay.data.length &&
+           replay.data[replay.idx].t <= target && guard++ < 300000) {
+      handleLine(replay.data[replay.idx].line);
+      replay.idx++;
+    }
+    replay.offset = target;
+    replay.lastElapsed = target;
+    els.replayTime.textContent = fmtDuration(target) + ' / ' + fmtDuration(replay.duration);
+    if (wasPlaying) playReplay();
+  }
+
+  function stopReplay() {
+    pauseReplay();
+    replay.idx = 0;
+    replay.offset = 0;
+    replay.lastElapsed = 0;
+    replay.started = false;
+    resetReplayState();
+    els.replaySeek.value = '0';
+    els.replayTime.textContent = replay.data.length
+      ? '0:00 / ' + fmtDuration(replay.duration)
+      : '—';
+    setStatus('idle', '回放已停止');
+  }
+
+  function deactivateReplay() {
+    pauseReplay();
+    replay.data = [];
+    replay.duration = 0;
+    replay.idx = 0;
+    replay.offset = 0;
+    replay.lastElapsed = 0;
+    replay.started = false;
+    replay.active = false;
+    els.replayBtn.disabled = true;
+    els.replayStop.disabled = true;
+    els.replaySpeed.disabled = true;
+    els.replaySeek.disabled = true;
+    els.replaySeek.value = '0';
+    els.replayBtn.textContent = '播放';
+    els.replayTime.textContent = '—';
+  }
+
+  function pushRaw(line) {
+    const ts = new Date().toLocaleTimeString('zh-TW', { hour12: false });
+    rawLines.push(ts + '  ' + line);
+    if (rawLines.length > 400) rawLines.shift();
+    if (els.rawDetails.open) {
+      els.rawLog.textContent = rawLines.join('\n');
+      els.rawLog.scrollTop = els.rawLog.scrollHeight;
+    }
+  }
+
+  function handleLine(line) {
+    const trimmed = line.trim();
+    if (!trimmed) return;
+    pushRaw(trimmed);
+    if (recording) pushRecord(trimmed);
+    const sentence = parseSentence(trimmed);
+    if (!sentence) return;
+    sentenceCount++;
+    state.lastSentenceAt = Date.now();
+    if (sentence.checksumOk === false) {
+      state.checksumErrors++;
+      scheduleRender();
+      return;
+    }
+    handleSentence(sentence);
+  }
+
+  function consume(text) {
+    buffer += text;
+    let idx;
+    while ((idx = buffer.indexOf('\n')) !== -1) {
+      const line = buffer.slice(0, idx).replace(/\r$/, '');
+      buffer = buffer.slice(idx + 1);
+      handleLine(line);
+    }
+    if (buffer.length > 16384) buffer = '';
+  }
+
+  function setConnected(on) {
+    connected = on;
+    els.connect.textContent = on ? '斷線' : '連線';
+    els.connect.classList.toggle('danger', on);
+    els.connect.classList.toggle('primary', !on);
+    els.port.disabled = on || !supported;
+    els.baud.disabled = on || !supported;
+    els.pick.disabled = on || !supported;
+  }
+
+  function setStatus(kind, text) {
+    els.status.className = 'status' + (kind ? ' ' + kind : '');
+    els.status.textContent = text;
+  }
+
+  function loadSettings() {
+    try {
+      return JSON.parse(localStorage.getItem(SETTINGS_KEY) || '{}') || {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function saveSettings() {
+    try {
+      localStorage.setItem(SETTINGS_KEY, JSON.stringify({
+        baud: els.baud.value,
+        base: Number(els.base.value) || 0,
+        follow: els.follow.checked,
+        coordFormat: els.coordFormat.value,
+        autoReconnect: els.autoReconnect.checked,
+        wakeLock: els.wakeLock.checked,
+        beep: els.beep.checked,
+        collapsed: $('panel').classList.contains('collapsed'),
+        lastPort: lastPortInfo
+      }));
+    } catch (e) { /* localStorage 無法寫入 */ }
+  }
+
+  function applySettings() {
+    const saved = loadSettings();
+    if (saved.baud && Array.from(els.baud.options).some((o) => o.value === String(saved.baud))) {
+      els.baud.value = String(saved.baud);
+    }
+    els.follow.checked = saved.follow !== false;
+    if (saved.coordFormat) els.coordFormat.value = saved.coordFormat;
+    els.autoReconnect.checked = saved.autoReconnect === true;
+    els.wakeLock.checked = saved.wakeLock === true;
+    els.beep.checked = saved.beep !== false;
+    lastPortInfo = saved.lastPort || null;
+    if (saved.collapsed) setPanelCollapsed(true);
+    if (map && Number.isInteger(saved.base) && MAP_STYLES[saved.base]) {
+      els.base.value = String(saved.base);
+      if (saved.base !== 0) map.setStyle(MAP_STYLES[saved.base].url);
+    }
+    if (!('wakeLock' in navigator)) {
+      els.wakeLock.checked = false;
+      els.wakeLock.disabled = true;
+    }
+  }
+
+  function portInfo(p) {
+    try {
+      return p.getInfo ? p.getInfo() : {};
+    } catch (e) {
+      return {};
+    }
+  }
+
+  function setPanelCollapsed(collapsed) {
+    $('panel').classList.toggle('collapsed', collapsed);
+    els.collapse.textContent = collapsed ? '+' : '−';
+    els.collapse.title = collapsed ? '展開面板' : '收合面板';
+    els.collapse.setAttribute('aria-expanded', String(!collapsed));
+  }
+
+  function maybeAutoConnect() {
+    if (autoConnectTried || !els.autoReconnect.checked || port || !supported) return;
+    if (!grantedPorts.length) return;
+    autoConnectTried = true;
+    let target = null;
+    if (lastPortInfo) {
+      target = grantedPorts.find((p) => {
+        const info = portInfo(p);
+        return info.usbVendorId === lastPortInfo.vid &&
+          info.usbProductId === lastPortInfo.pid;
+      }) || null;
+    }
+    if (!target) target = grantedPorts[0];
+    selectedPort = target;
+    const idx = grantedPorts.indexOf(target);
+    if (idx >= 0) els.port.value = String(idx);
+    setStatus('warn', '自動重連中…');
+    setTimeout(() => {
+      if (!port && !closing) connectSerial();
+    }, 500);
+  }
+
+  async function updateWakeLock() {
+    if (!('wakeLock' in navigator)) return;
+    if (!els.wakeLock.checked || !port) {
+      if (wakeLock) {
+        try { await wakeLock.release(); } catch (e) { /* 已釋放 */ }
+        wakeLock = null;
+      }
+      return;
+    }
+    if (wakeLock) return;
+    try {
+      wakeLock = await navigator.wakeLock.request('screen');
+      wakeLock.addEventListener('release', () => { wakeLock = null; });
+    } catch (e) {
+      wakeLock = null;
+    }
+  }
+
+  function describePort(p, index) {
+    let info = {};
+    try {
+      info = p.getInfo ? p.getInfo() : {};
+    } catch (e) {
+      info = {};
+    }
+    const ids = [];
+    if (info.usbVendorId != null) {
+      ids.push('VID ' + info.usbVendorId.toString(16).toUpperCase().padStart(4, '0'));
+    }
+    if (info.usbProductId != null) {
+      ids.push('PID ' + info.usbProductId.toString(16).toUpperCase().padStart(4, '0'));
+    }
+    return ids.length
+      ? '序列埠 ' + (index + 1) + '（' + ids.join(' ') + '）'
+      : '序列埠 ' + (index + 1);
+  }
+
+  async function refreshPorts(preferred) {
+    if (!supported) return;
+    try {
+      grantedPorts = await navigator.serial.getPorts();
+    } catch (e) {
+      grantedPorts = [];
+    }
+    els.port.innerHTML = '';
+
+    if (!grantedPorts.length) {
+      const opt = document.createElement('option');
+      opt.value = '';
+      opt.textContent = '尚未選擇（請按「選擇…」）';
+      els.port.appendChild(opt);
+      selectedPort = null;
+      return;
+    }
+
+    grantedPorts.forEach((p, i) => {
+      const opt = document.createElement('option');
+      opt.value = String(i);
+      opt.textContent = describePort(p, i);
+      els.port.appendChild(opt);
+    });
+
+    const target = preferred || selectedPort;
+    const idx = target ? grantedPorts.indexOf(target) : -1;
+    const chosen = idx >= 0 ? idx : 0;
+    els.port.value = String(chosen);
+    selectedPort = grantedPorts[chosen];
+  }
+
+  async function choosePort() {
+    try {
+      const chosen = await navigator.serial.requestPort();
+      await refreshPorts(chosen);
+      setStatus('idle', '已選擇連接埠，請按「連線」');
+    } catch (err) {
+      if (err && err.name === 'NotFoundError') return;
+      setStatus('err', '選擇連接埠失敗：' + (err.message || err.name));
+    }
+  }
+
+  async function readLoop(activeReader) {
+    let failure = null;
+    try {
+      while (true) {
+        const { value, done } = await activeReader.read();
+        if (done) break;
+        if (value) consume(value);
+      }
+    } catch (err) {
+      failure = err;
+    }
+    if (reader === activeReader && port && !closing) {
+      closeSerial('err', failure
+        ? '連線中斷：' + (failure.message || failure.name)
+        : '序列埠已關閉');
+    }
+  }
+
+  async function connectSerial() {
+    if (replay.active) {
+      if (replay.started) stopReplay();
+      deactivateReplay();
+    }
+    if (!selectedPort) {
+      await choosePort();
+      if (!selectedPort) return;
+    }
+    const target = selectedPort;
+    try {
+      setStatus('warn', '連線中…');
+      await target.open({
+        baudRate: Number(els.baud.value),
+        dataBits: 8,
+        stopBits: 1,
+        parity: 'none',
+        flowControl: 'none'
+      });
+    } catch (err) {
+      setStatus('err', '無法開啟序列埠：' + (err.message || err.name) +
+        '（可能被其他程式占用，請關閉 Arduino IDE 序列埠監控）');
+      return;
+    }
+
+    port = target;
+    buffer = '';
+    state.lastSentenceAt = 0;
+    state.fixTime = null;
+    state.dayStart = null;
+    state.checksumErrors = 0;
+    state.rate = 0;
+    const decoder = new TextDecoderStream();
+    pipePromise = port.readable.pipeTo(decoder.writable).catch((err) => {
+      if (!closing) console.warn('serial pipe:', err);
+    });
+    reader = decoder.readable.getReader();
+    setConnected(true);
+    setStatus('ok', '已連線 · 等待資料');
+    readLoop(reader);
+
+    const info = portInfo(target);
+    if (info.usbVendorId != null || info.usbProductId != null) {
+      lastPortInfo = { vid: info.usbVendorId, pid: info.usbProductId };
+    }
+    reconnectAttempts = 0;
+    ensureAudio();
+    updateWakeLock();
+    saveSettings();
+  }
+
+  async function closeSerial(kind, message) {
+    if (closing) return;
+    closing = true;
+    try {
+      if (reader) await reader.cancel();
+    } catch (e) { /* 裝置可能已拔出 */ }
+    try {
+      if (pipePromise) await pipePromise;
+    } catch (e) { /* 串流已中止 */ }
+    try {
+      if (port) await port.close();
+    } catch (e) { /* 已關閉 */ }
+    reader = null;
+    pipePromise = null;
+    port = null;
+    buffer = '';
+    state.pdop = null;
+    state.vdop = null;
+    state.fixTime = null;
+    state.dayStart = null;
+    state.checksumErrors = 0;
+    state.rate = 0;
+    state.satsUsed = null;
+    state.satsView = null;
+    if (recording) {
+      recording = false;
+      updateRecordUi();
+    }
+    if (wakeLock) {
+      wakeLock.release().catch(() => {});
+      wakeLock = null;
+    }
+    skySats.clear();
+    usedSats.clear();
+    gsaSeen = false;
+    scheduleRender();
+    closing = false;
+    setConnected(false);
+    setStatus(kind || 'idle', message || '未連線');
+    if (kind === 'err' && els.autoReconnect.checked && reconnectAttempts < 5) {
+      reconnectAttempts++;
+      const delay = Math.min(10000, 1500 * reconnectAttempts);
+      setStatus('warn', '連線中斷，' + Math.round(delay / 1000) + ' 秒後自動重試…');
+      setTimeout(() => {
+        if (!port && !closing && els.autoReconnect.checked) connectSerial();
+      }, delay);
+    }
+    if (supported) refreshPorts().catch(() => {});
+  }
+
+  els.pick.addEventListener('click', () => { choosePort(); });
+
+  els.connect.addEventListener('click', async () => {
+    ensureAudio();
+    if (port) {
+      await closeSerial('idle', '已中斷連線');
+    } else {
+      await connectSerial();
+    }
+    updateWakeLock();
+  });
+
+  els.port.addEventListener('change', () => {
+    selectedPort = els.port.value === ''
+      ? null
+      : (grantedPorts[Number(els.port.value)] || null);
+  });
+
+  els.base.addEventListener('change', () => {
+    if (map) map.setStyle(MAP_STYLES[Number(els.base.value)].url);
+    saveSettings();
+  });
+
+  els.center.addEventListener('click', () => {
+    if (!map || state.lat == null || state.lon == null) return;
+    map.flyTo({
+      center: [state.lon, state.lat],
+      zoom: Math.max(map.getZoom(), 16),
+      duration: 800
+    });
+  });
+
+  els.clear.addEventListener('click', () => {
+    track = [];
+    resetTrip();
+    updateTrackSource();
+    scheduleRender();
+  });
+
+  els.fit.addEventListener('click', fitTrack);
+  els.coordFormat.addEventListener('change', () => {
+    scheduleRender();
+    saveSettings();
+  });
+  els.copy.addEventListener('click', copyCoord);
+  els.gmaps.addEventListener('click', () => openCoordMap('gmaps'));
+  els.osm.addEventListener('click', () => openCoordMap('osm'));
+  els.exportBtn.addEventListener('click', exportTrack);
+  els.importBtn.addEventListener('click', () => els.importFile.click());
+  els.importFile.addEventListener('change', () => {
+    const file = els.importFile.files && els.importFile.files[0];
+    if (file) importTrackFile(file);
+    els.importFile.value = '';
+  });
+
+  els.record.addEventListener('click', toggleRecording);
+  els.saveRec.addEventListener('click', saveRecording);
+  els.loadReplay.addEventListener('click', () => els.replayFile.click());
+  els.replayFile.addEventListener('change', () => {
+    const file = els.replayFile.files && els.replayFile.files[0];
+    if (file) loadReplayFile(file);
+    els.replayFile.value = '';
+  });
+  els.replayBtn.addEventListener('click', () => {
+    if (replay.playing) pauseReplay();
+    else playReplay();
+  });
+  els.replayStop.addEventListener('click', stopReplay);
+  els.replaySpeed.addEventListener('change', () => {
+    if (!replay.playing) return;
+    replay.offset = replay.lastElapsed;
+    replay.wallStart = performance.now();
+  });
+  els.replaySeek.addEventListener('change', () => {
+    seekReplay(Number(els.replaySeek.value) / 1000);
+  });
+  updateRecordUi();
+
+  els.follow.addEventListener('change', () => {
+    if (els.follow.checked && map && state.lat != null && state.lon != null) {
+      map.easeTo({ center: [state.lon, state.lat], duration: 500 });
+    }
+    saveSettings();
+  });
+
+  els.baud.addEventListener('change', saveSettings);
+  els.autoReconnect.addEventListener('change', saveSettings);
+  els.beep.addEventListener('change', saveSettings);
+  els.wakeLock.addEventListener('change', () => {
+    saveSettings();
+    updateWakeLock();
+  });
+
+  els.collapse.addEventListener('click', () => {
+    const next = !$('panel').classList.contains('collapsed');
+    setPanelCollapsed(next);
+    saveSettings();
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && els.wakeLock.checked && port && !wakeLock) {
+      updateWakeLock();
+    }
+  });
+
+  els.rawDetails.addEventListener('toggle', () => {
+    if (els.rawDetails.open) {
+      els.rawLog.textContent = rawLines.join('\n');
+      els.rawLog.scrollTop = els.rawLog.scrollHeight;
+    }
+  });
+
+  if (supported) {
+    navigator.serial.addEventListener('disconnect', (event) => {
+      if (event.target === port) {
+        closeSerial('err', '裝置已中斷（USB 已拔出？）');
+      } else {
+        refreshPorts().catch(() => {});
+      }
+    });
+    navigator.serial.addEventListener('connect', () => {
+      refreshPorts().catch(() => {});
+    });
+  }
+
+  setInterval(() => {
+    const now = Date.now();
+    const prevRate = state.rate;
+    state.rate = sentenceCount;
+    sentenceCount = 0;
+    if (state.rate !== prevRate) scheduleRender();
+    if (recording) updateRecordUi();
+    if (pruneSky(now)) {
+      state.satsView = skySats.size;
+      scheduleRender();
+    }
+    if (!port) return;
+    if (now - (state.lastSentenceAt || 0) > 5000) {
+      setStatus('warn', '已連線 · 等待資料（請確認鮑率與 TX/RX 接線）');
+    } else {
+      setStatus('ok', '已連線 · 接收中');
+    }
+    if (state.hasFix && now - state.lastPosAt > 6000) {
+      state.hasFix = false;
+      if (markerEl) markerEl.classList.add('stale');
+      if (els.beep.checked) beep();
+      scheduleRender();
+    }
+  }, 1000);
+
+  let deferredInstall = null;
+
+  window.addEventListener('beforeinstallprompt', (event) => {
+    event.preventDefault();
+    deferredInstall = event;
+    els.install.hidden = false;
+  });
+
+  window.addEventListener('appinstalled', () => {
+    deferredInstall = null;
+    els.install.hidden = true;
+  });
+
+  els.install.addEventListener('click', async () => {
+    if (!deferredInstall) return;
+    deferredInstall.prompt();
+    try {
+      await deferredInstall.userChoice;
+    } catch (e) { /* 使用者取消 */ }
+    deferredInstall = null;
+    els.install.hidden = true;
+  });
+
+  if ('serviceWorker' in navigator &&
+      (location.protocol === 'https:' || location.hostname === 'localhost' ||
+       location.hostname === '127.0.0.1')) {
+    navigator.serviceWorker.register('./sw.js').catch((err) => {
+      console.warn('service worker:', err);
+    });
+  }
+
+  if (!supported) {
+    els.hint.textContent = '此瀏覽器不支援 Web Serial，請改用桌面版 Chrome / Edge（89 以上）開啟。';
+    setStatus('err', '瀏覽器不支援 Web Serial');
+    [els.port, els.baud, els.pick, els.connect].forEach((el) => { el.disabled = true; });
+  } else {
+    setConnected(false);
+    refreshPorts().then(() => maybeAutoConnect()).catch(() => {});
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>
